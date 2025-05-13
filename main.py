@@ -50,6 +50,7 @@ class AnnotationApp:
         self.browse_btn.pack(pady=(0, 10), fill=tk.X)
 
         # Image navigation controls
+        tk.Label(self.left_frame, text="Images:", bg='#f0f0f0').pack(pady=(10, 0), anchor='w')
         nav_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         nav_frame.pack(fill=tk.X, pady=(10, 0))
 
@@ -179,7 +180,7 @@ class AnnotationApp:
             return
 
         self.images = []
-        supported_formats = ('.jpg', '.jpeg', '.png', '.bmp', '.gif')
+        supported_formats = ('.jpg', '.jpeg', '.png', '.bmp')
 
         for file in os.listdir(self.image_folder):
             if file.lower().endswith(supported_formats):
@@ -327,8 +328,8 @@ class AnnotationApp:
                     break
 
             # Create polygon with more transparent fill
-            outline_color = "#ffffff" if is_selected else self.get_class_color(class_id)  # White outline for selected
-            outline_width = 3 if is_selected else 2  # Thicker outline for selected
+            outline_color = "#ffffff" if is_selected else self.get_class_color(class_id)
+            outline_width = 3 if is_selected else 2
 
             polygon_id = self.canvas.create_polygon(
                 scaled_points,
@@ -343,7 +344,7 @@ class AnnotationApp:
                 scaled_points,
                 outline="",
                 fill=self.get_class_color(class_id),
-                stipple="gray25",  # More transparent than gray50
+                stipple="gray25",
                 tags=("fill", f"fill_{ann_id}")
             )
 
