@@ -99,6 +99,7 @@ class AnnotationApp:
 
         self.classes_listbox = tk.Listbox(self.left_frame, height=10, selectmode=tk.SINGLE)
         self.classes_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.classes_listbox.bind('<<ListboxSelect>>', self.on_class_selected)
 
         # Change class button
         self.change_class_btn = tk.Button(self.left_frame, text="Change Class to Selected",
@@ -541,6 +542,10 @@ class AnnotationApp:
         self.classes_listbox.delete(0, tk.END)
         for i, cls in enumerate(self.classes):
             self.classes_listbox.insert(tk.END, f"{i + 1}. {cls}")
+
+        if self.current_class is not None and self.current_class < len(self.classes):
+            self.classes_listbox.selection_set(self.current_class)
+            self.classes_listbox.activate(self.current_class)
 
     def select_class_by_index(self, index):
         if 0 <= index < len(self.classes):
@@ -1010,6 +1015,11 @@ class AnnotationApp:
             self.save_annotations()
             self.display_image()
 
+    def on_class_selected(self, event):
+        selection = self.classes_listbox.curselection()
+        if selection:
+            self.current_class = selection[0]
+            self.status_bar.config(text=f"Selected class: {self.classes[self.current_class]}")
 
 if __name__ == "__main__":
     root = tk.Tk()
