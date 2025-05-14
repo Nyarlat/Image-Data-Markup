@@ -180,6 +180,9 @@ class AnnotationApp:
 
         self.root.bind("m", lambda e: self.toggle_drawing_mode())
 
+        self.root.bind("<Up>", lambda e: self.select_prev_class())
+        self.root.bind("<Down>", lambda e: self.select_next_class())
+
     def set_ctrl_state(self, state):
         self.ctrl_pressed = state
         if state:
@@ -548,12 +551,17 @@ class AnnotationApp:
             self.classes_listbox.activate(self.current_class)
 
     def select_class_by_index(self, index):
+        if not self.classes:
+            return
+
         if 0 <= index < len(self.classes):
             self.classes_listbox.selection_clear(0, tk.END)
             self.classes_listbox.selection_set(index)
             self.classes_listbox.activate(index)
+            self.classes_listbox.see(index)
             self.current_class = index
-            self.status_bar.config(text=f"Selected class: {self.classes[index]}")
+            self.status_bar.config(
+                text=f"Selected class: {self.classes[index]}")
 
     def jump_to_image(self, event=None):
         try:
@@ -1016,10 +1024,41 @@ class AnnotationApp:
             self.display_image()
 
     def on_class_selected(self, event):
+        if not self.classes:
+            return
+
         selection = self.classes_listbox.curselection()
         if selection:
             self.current_class = selection[0]
             self.status_bar.config(text=f"Selected class: {self.classes[self.current_class]}")
+
+    def select_prev_class(self):
+        if not self.classes:
+            self.status_bar.config(text="No classes available")
+            return
+
+        if self.current_class is None:
+            new_index = 0
+        else:
+            new_index = self.current_class - 1
+            if new_index < 0:
+                new_index = len(self.classes) - 1
+
+        self.select_class_by_index(new_index)
+
+    def select_next_class(self):
+        if not self.classes:
+            self.status_bar.config(text="No classes available")
+            return
+
+        if self.current_class is None:
+            new_index = 0
+        else:
+            new_index = self.current_class + 1
+            if new_index >= len(self.classes):
+                new_index = 0
+
+        self.select_class_by_index(new_index)
 
 if __name__ == "__main__":
     root = tk.Tk()
