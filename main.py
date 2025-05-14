@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 import numpy as np
-
+from scipy.interpolate import splprep, splev
 
 class AnnotationApp:
     def __init__(self, root):
@@ -26,12 +26,16 @@ class AnnotationApp:
         self.dragging_polygon = None
         self.dragging_offset = (0, 0)
         self.ctrl_pressed = False
+        self.solid_line_mode = False  # New mode for solid line drawing
+        self.solid_line_points = []  # Stores points during solid line drawing
+        self.solid_line_id = None  # ID of the current solid line being drawn
 
         # UI Setup
         self.setup_ui()
 
         # Bind keyboard shortcuts
         self.bind_shortcuts()
+
 
     def setup_ui(self):
         # Main frames
@@ -107,14 +111,15 @@ class AnnotationApp:
         tool_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         tool_frame.pack(fill=tk.X)
 
+        # Add mode switch button
+        self.mode_btn = tk.Button(tool_frame, text="Switch to Solid Line", command=self.toggle_drawing_mode)
+        self.mode_btn.pack(fill=tk.X, padx=2, pady=2)
+
         self.delete_poly_btn = tk.Button(tool_frame, text="Delete Selected", command=self.delete_selected_polygon)
         self.delete_poly_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
         self.clear_all_btn = tk.Button(tool_frame, text="Clear All", command=self.clear_all_annotations)
         self.clear_all_btn.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=2)
-
-        self.delete_image_btn = tk.Button(self.left_frame, text="Delete Image", command=self.delete_current_image)
-        self.delete_image_btn.pack(fill=tk.X, padx=5, pady=(10, 0))
 
         # Status bar
         self.status_bar = tk.Label(self.left_frame, text="No folder selected", bd=1, relief=tk.SUNKEN, anchor=tk.W,
@@ -138,6 +143,19 @@ class AnnotationApp:
         self.image_ratio = 1.0
         self.image_position = (0, 0)
 
+    def toggle_drawing_mode(self):
+        self.solid_line_mode = not self.solid_line_mode
+        if self.solid_line_mode:
+            self.mode_btn.config(text="Switch to Point Mode")
+        else:
+            self.mode_btn.config(text="Switch to Solid Line")
+
+        # Clear any ongoing drawing
+        self.current_polygon = []
+        self.solid_line_points = []
+        self.canvas.delete("preview")
+        self.solid_line_id = None
+
     def bind_shortcuts(self):
         # Bind number keys 1-9 to select classes
         for i in range(1, 10):
@@ -158,6 +176,8 @@ class AnnotationApp:
 
         # Bind Delete key to delete selected polygon
         self.root.bind("<Delete>", lambda e: self.delete_selected_polygon())
+
+        self.root.bind("m", lambda e: self.toggle_drawing_mode())
 
     def set_ctrl_state(self, state):
         self.ctrl_pressed = state
@@ -724,21 +744,122 @@ class AnnotationApp:
             normalized_x = img_x / img_width
             normalized_y = img_y / img_height
 
-            self.current_polygon.append((normalized_x, normalized_y))
-
-            # Draw the current polygon
-            self.draw_current_polygon(event.x, event.y)
+            if self.solid_line_mode:
+                # Start drawing a solid line
+                self.solid_line_points = [(normalized_x, normalized_y)]
+                self.solid_line_id = "solid_" + str(id(self))
+                self.draw_solid_line_preview(event.x, event.y)
+            else:
+                # Point-by-point mode
+                self.current_polygon.append((normalized_x, normalized_y))
+                self.draw_current_polygon(event.x, event.y)
 
     def canvas_right_click(self, event):
-        if len(self.current_polygon) >= 3:
+        if self.solid_line_mode:
+            if len(self.solid_line_points) >= 2:
+                # Complete the solid line area
+                self.complete_solid_line_area()
+        elif len(self.current_polygon) >= 3:
             # Save the polygon
             self.save_current_polygon()
             self.display_image()
 
     def canvas_mouse_move(self, event):
-        if len(self.current_polygon) > 0:
+        if self.solid_line_mode and self.solid_line_points:
+            # Update solid line preview
+            img_x = (event.x - self.image_position[0]) / self.image_ratio
+            img_y = (event.y - self.image_position[1]) / self.image_ratio
+            img_width, img_height = self.current_image.size
+
+            if 0 <= img_x <= img_width and 0 <= img_y <= img_height:
+                normalized_x = img_x / img_width
+                normalized_y = img_y / img_height
+
+                # Add point if mouse has moved significantly
+                if not self.solid_line_points or (abs(self.solid_line_points[-1][0] - normalized_x) > 0.005 or
+                                                  abs(self.solid_line_points[-1][1] - normalized_y) > 0.005):
+                    self.solid_line_points.append((normalized_x, normalized_y))
+
+                self.draw_solid_line_preview(event.x, event.y)
+        elif len(self.current_polygon) > 0:
             # Draw preview line from last point to current mouse position
             self.draw_current_polygon(event.x, event.y)
+
+    def draw_solid_line_preview(self, mouse_x=None, mouse_y=None):
+        if not self.solid_line_points:
+            return
+
+        # Delete previous preview
+        self.canvas.delete("preview")
+
+        # Convert normalized coordinates to canvas coordinates
+        img_width, img_height = self.current_image.size
+        scaled_points = [
+            (point[0] * img_width * self.image_ratio + self.image_position[0],
+             point[1] * img_height * self.image_ratio + self.image_position[1])
+            for point in self.solid_line_points
+        ]
+
+        # Draw the line
+        if len(scaled_points) >= 2:
+            self.canvas.create_line(
+                *[coord for point in scaled_points for coord in point],
+                fill=self.get_class_color(self.current_class),
+                width=2,
+                tags=("preview", self.solid_line_id)
+            )
+
+    def complete_solid_line_area(self):
+        if len(self.solid_line_points) < 2:
+            return
+
+        # Simplify the points to reduce the number of vertices
+        simplified_points = self.simplify_points(self.solid_line_points)
+
+        # Ensure the area is closed by connecting first and last points
+        if simplified_points[0] != simplified_points[-1]:
+            simplified_points.append(simplified_points[0])
+
+        # Create a polygon from the simplified points
+        self.current_polygon = simplified_points
+        self.save_current_polygon()
+
+        # Reset solid line drawing
+        self.solid_line_points = []
+        self.solid_line_id = None
+        self.canvas.delete("preview")
+        self.display_image()
+
+    def simplify_points(self, points, tolerance=0.005):
+        """Reduce the number of points using a combination of interpolation and Douglas-Peucker algorithm"""
+        if len(points) <= 3:
+            return points.copy()
+
+        # Convert points to numpy array for processing
+        points_array = np.array(points)
+        x = points_array[:, 0]
+        y = points_array[:, 1]
+
+        # Fit a spline to the points
+        try:
+            tck, u = splprep([x, y], s=0, per=False)
+        except:
+            # If spline fitting fails, just return every 3rd point
+            return points[::3] + [points[-1]]
+
+        # Evaluate the spline at fewer points
+        new_u = np.linspace(0, 1, max(20, len(points) // 3))
+        new_x, new_y = splev(new_u, tck)
+
+        # Combine the new points
+        simplified = list(zip(new_x, new_y))
+
+        # Ensure we keep the first and last points
+        if len(simplified) > 0:
+            simplified[0] = points[0]
+            simplified[-1] = points[-1]
+
+        return simplified
 
     def canvas_drag(self, event):
         if self.dragging_vertex is not None and self.ctrl_pressed:
