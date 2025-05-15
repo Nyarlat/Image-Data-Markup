@@ -79,14 +79,26 @@ class AnnotationApp:
         classes_btn_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         classes_btn_frame.pack(fill=tk.X)
 
-        self.add_class_btn = tk.Button(classes_btn_frame, text="Add", command=self.add_class)
-        self.add_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        btn_frame_top = tk.Frame(classes_btn_frame, bg='#f0f0f0')
+        btn_frame_top.pack(fill=tk.X)
 
-        self.rename_class_btn = tk.Button(classes_btn_frame, text="Rename", command=self.rename_class)
-        self.rename_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.add_class_btn = tk.Button(btn_frame_top, text="Add", command=self.add_class)
+        self.add_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
 
-        self.remove_class_btn = tk.Button(classes_btn_frame, text="Remove", command=self.remove_class)
-        self.remove_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.rename_class_btn = tk.Button(btn_frame_top, text="Rename", command=self.rename_class)
+        self.rename_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.remove_class_btn = tk.Button(btn_frame_top, text="Remove", command=self.remove_class)
+        self.remove_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
+
+        btn_frame_bottom = tk.Frame(classes_btn_frame, bg='#f0f0f0')
+        btn_frame_bottom.pack(fill=tk.X)
+
+        self.move_up_btn = tk.Button(btn_frame_bottom, text="Move up", command=lambda: self.move_class(up=True))
+        self.move_up_btn.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.move_down_btn = tk.Button(btn_frame_bottom, text="Move down", command=lambda: self.move_class(up=False))
+        self.move_down_btn.pack(side=tk.LEFT, expand=True, padx=2)
 
         # Import/Export buttons
         classes_io_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
@@ -184,6 +196,9 @@ class AnnotationApp:
 
         self.root.bind("<Up>", lambda e: self.select_prev_class())
         self.root.bind("<Down>", lambda e: self.select_next_class())
+
+        self.root.bind("<Control-Up>", lambda e: self.move_class(up=True))
+        self.root.bind("<Control-Down>", lambda e: self.move_class(up=False))
 
     def set_ctrl_state(self, state):
         self.ctrl_pressed = state
@@ -498,6 +513,45 @@ class AnnotationApp:
         self.save_annotations()
         self.display_image()
 
+    def move_class(self, up=True):
+        selection = self.classes_listbox.curselection()
+        if not selection:
+            return
+
+        current_idx = selection[0]
+        new_idx = current_idx - 1 if up else current_idx + 1
+
+        if new_idx < 0:
+            messagebox.showinfo("Info", "Already at the top of the list")
+            return
+        if new_idx >= len(self.classes):
+            messagebox.showinfo("Info", "Already at the bottom of the list")
+            return
+
+        if new_idx < 0 or new_idx >= len(self.classes):
+            return
+
+        self.classes[current_idx], self.classes[new_idx] = self.classes[new_idx], self.classes[current_idx]
+
+        for ann_id, ann in self.annotations.items():
+            if ann['class_id'] == current_idx:
+                ann['class_id'] = new_idx
+            elif ann['class_id'] == new_idx:
+                ann['class_id'] = current_idx
+
+        if self.current_class == current_idx:
+            self.current_class = new_idx
+        elif self.current_class == new_idx:
+            self.current_class = current_idx
+
+        self.class_colors = {}
+        self.update_classes_listbox()
+        self.save_annotations()
+        self.display_image()
+
+        self.classes_listbox.selection_set(new_idx)
+        self.classes_listbox.see(new_idx)
+
     def remove_annotations_for_class(self, class_id):
         """Remove all annotations for a given class_id"""
         annotations_to_delete = [
@@ -594,7 +648,9 @@ class AnnotationApp:
             messagebox.showerror("Error", f"Failed to rename image: {e}")
 
     def update_classes_listbox(self):
+        current_selection = self.classes_listbox.curselection()
         self.classes_listbox.delete(0, tk.END)
+
         for i, cls in enumerate(self.classes):
             self.classes_listbox.insert(tk.END, f"{i + 1}. {cls}")
 
