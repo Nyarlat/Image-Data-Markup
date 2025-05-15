@@ -27,6 +27,7 @@ class AnnotationApp:
         self.dragging_offset = (0, 0)
         self.ctrl_pressed = False
         self.solid_line_mode = False  # New mode for solid line drawing
+        self.is_drawing_solid_line = False  # New mode for solid line drawing
         self.solid_line_points = []  # Stores points during solid line drawing
         self.solid_line_id = None  # ID of the current solid line being drawn
 
@@ -133,10 +134,11 @@ class AnnotationApp:
 
         # Bind canvas events
         self.canvas.bind("<Button-1>", self.canvas_left_click)
+        self.canvas.bind("<B1-Motion>", self.canvas_mouse_move)
         self.canvas.bind("<Button-3>", self.canvas_right_click)
         self.canvas.bind("<Motion>", self.canvas_mouse_move)
-        self.canvas.bind("<B1-Motion>", self.canvas_drag)
-        self.canvas.bind("<ButtonRelease-1>", self.canvas_release)
+
+        self.canvas.bind("<ButtonRelease-1>", self.canvas_left_release)
         self.canvas.bind("<Double-Button-1>", self.canvas_double_click)
 
         # Image display variables
@@ -758,14 +760,22 @@ class AnnotationApp:
             normalized_y = img_y / img_height
 
             if self.solid_line_mode:
-                # Start drawing a solid line
+                # Start new solid line drawing
                 self.solid_line_points = [(normalized_x, normalized_y)]
                 self.solid_line_id = "solid_" + str(id(self))
-                self.draw_solid_line_preview(event.x, event.y)
+                self.is_drawing_solid_line = True  # New flag to track drawing state
             else:
                 # Point-by-point mode
                 self.current_polygon.append((normalized_x, normalized_y))
                 self.draw_current_polygon(event.x, event.y)
+
+    def canvas_left_release(self, event):
+        if self.solid_line_mode and self.is_drawing_solid_line:
+            # Complete the solid line area when mouse button is released
+            if len(self.solid_line_points) >= 2:
+                self.complete_solid_line_area()
+            self.is_drawing_solid_line = False
+        self.dragging_vertex = None
 
     def canvas_right_click(self, event):
         if self.solid_line_mode:
@@ -778,8 +788,8 @@ class AnnotationApp:
             self.display_image()
 
     def canvas_mouse_move(self, event):
-        if self.solid_line_mode and self.solid_line_points:
-            # Update solid line preview
+        if self.solid_line_mode and self.is_drawing_solid_line:
+            # Update solid line preview only when drawing (LMB pressed)
             img_x = (event.x - self.image_position[0]) / self.image_ratio
             img_y = (event.y - self.image_position[1]) / self.image_ratio
             img_width, img_height = self.current_image.size
