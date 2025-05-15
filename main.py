@@ -739,25 +739,15 @@ class AnnotationApp:
                 self.status_bar.config(text="No images in folder")
 
     def delete_selected_polygon(self):
-        if not self.annotations:
-            return
-
-        # Find selected polygon (last clicked)
-        selected = None
-        for item in self.canvas.find_withtag("selected"):
-            tags = self.canvas.gettags(item)
-            for tag in tags:
-                if tag.startswith("polygon_"):
-                    ann_id = int(tag.split("_")[1])
-                    selected = ann_id
-                    break
-            if selected is not None:
-                break
-
-        if selected is not None and selected in self.annotations:
-            del self.annotations[selected]
-            self.save_annotations()
-            self.display_image()
+        if hasattr(self, 'selected_polygon_id') and self.selected_polygon_id is not None:
+            if self.selected_polygon_id in self.annotations:
+                # Delete the polygon that's actually selected
+                del self.annotations[self.selected_polygon_id]
+                self.save_annotations()
+                self.selected_polygon_id = None  # Clear selection after deletion
+                self.display_image()
+        else:
+            messagebox.showinfo("Info", "No polygon selected")
 
     def change_selected_polygon_class(self):
         if not self.annotations or self.current_class is None:
@@ -825,6 +815,9 @@ class AnnotationApp:
                 self.solid_line_points = [(normalized_x, normalized_y)]
                 self.solid_line_id = "solid_" + str(id(self))
                 self.is_drawing_solid_line = True
+                # Clear selection when starting new annotation
+                self.selected_polygon_id = None
+                self.display_image()
             return
 
         # Check if clicked on vertex
@@ -844,11 +837,12 @@ class AnnotationApp:
         for item in clicked_items:
             tags = self.canvas.gettags(item)
             if "polygon" in tags:
-                # Clear previous selection
-                self.canvas.itemconfig("polygon", width=2, outline=self.get_class_color(self.current_class))
-                # Select this polygon with white border
-                self.canvas.itemconfig(item, width=3, outline="#ffffff", tags=tags + ("selected",))
-                self.selected_polygon_id = int(tags[1].split("_")[1])
+                # Get the actual annotation ID from the tags
+                clicked_polygon_id = int(tags[1].split("_")[1])
+                # Update the selected polygon ID
+                self.selected_polygon_id = clicked_polygon_id
+                # Redraw to update selection
+                self.display_image()
                 return
 
         # Normal point-by-point mode
@@ -862,6 +856,8 @@ class AnnotationApp:
                 normalized_y = img_y / img_height
                 self.current_polygon.append((normalized_x, normalized_y))
                 self.draw_current_polygon(event.x, event.y)
+                # Clear selection when starting new annotation
+                self.selected_polygon_id = None
 
     def handle_vertex_grab(self, event):
         clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
