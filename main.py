@@ -41,6 +41,8 @@ class AnnotationApp:
     def setup_ui(self):
         # Main frames
         self.left_frame = tk.Frame(self.root, width=200, bg='#f0f0f0')
+        self.left_frame.pack_propagate(False)
+        self.left_frame.grid_propagate(False)
         self.left_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
 
         self.right_frame = tk.Frame(self.root, bg='white')
