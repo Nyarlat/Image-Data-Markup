@@ -26,10 +26,11 @@ class AnnotationApp:
         self.dragging_polygon = None
         self.dragging_offset = (0, 0)
         self.ctrl_pressed = False
-        self.solid_line_mode = False  # New mode for solid line drawing
-        self.is_drawing_solid_line = False  # New mode for solid line drawing
-        self.solid_line_points = []  # Stores points during solid line drawing
-        self.solid_line_id = None  # ID of the current solid line being drawn
+        self.solid_line_mode = False
+        self.solid_line_points = []
+        self.solid_line_id = None
+        self.is_drawing_solid_line = False
+        self.selected_polygon_id = None
 
         # UI Setup
         self.setup_ui()
@@ -81,26 +82,14 @@ class AnnotationApp:
         classes_btn_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         classes_btn_frame.pack(fill=tk.X)
 
-        btn_frame_top = tk.Frame(classes_btn_frame, bg='#f0f0f0')
-        btn_frame_top.pack(fill=tk.X)
+        self.add_class_btn = tk.Button(classes_btn_frame, text="Add", command=self.add_class)
+        self.add_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        self.add_class_btn = tk.Button(btn_frame_top, text="Add", command=self.add_class)
-        self.add_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
+        self.rename_class_btn = tk.Button(classes_btn_frame, text="Rename", command=self.rename_class)
+        self.rename_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
-        self.rename_class_btn = tk.Button(btn_frame_top, text="Rename", command=self.rename_class)
-        self.rename_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
-
-        self.remove_class_btn = tk.Button(btn_frame_top, text="Remove", command=self.remove_class)
-        self.remove_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
-
-        btn_frame_bottom = tk.Frame(classes_btn_frame, bg='#f0f0f0')
-        btn_frame_bottom.pack(fill=tk.X)
-
-        self.move_up_btn = tk.Button(btn_frame_bottom, text="Move up", command=lambda: self.move_class(up=True))
-        self.move_up_btn.pack(side=tk.LEFT, expand=True, padx=2)
-
-        self.move_down_btn = tk.Button(btn_frame_bottom, text="Move down", command=lambda: self.move_class(up=False))
-        self.move_down_btn.pack(side=tk.LEFT, expand=True, padx=2)
+        self.remove_class_btn = tk.Button(classes_btn_frame, text="Remove", command=self.remove_class)
+        self.remove_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
         # Import/Export buttons
         classes_io_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
@@ -118,7 +107,7 @@ class AnnotationApp:
 
         # Change class button
         self.change_class_btn = tk.Button(self.left_frame, text="Change Class to Selected",
-                                          command=self.change_selected_polygon_class)
+                                        command=self.change_selected_polygon_class)
         self.change_class_btn.pack(fill=tk.X, padx=5, pady=(0, 10))
 
         # Annotation controls
@@ -127,7 +116,6 @@ class AnnotationApp:
         tool_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         tool_frame.pack(fill=tk.X)
 
-        # Add mode switch button
         self.mode_btn = tk.Button(tool_frame, text="Switch to Solid Line", command=self.toggle_drawing_mode)
         self.mode_btn.pack(fill=tk.X, padx=2, pady=2)
 
@@ -137,9 +125,12 @@ class AnnotationApp:
         self.clear_all_btn = tk.Button(tool_frame, text="Clear All", command=self.clear_all_annotations)
         self.clear_all_btn.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=2)
 
+        self.delete_image_btn = tk.Button(self.left_frame, text="Delete Image", command=self.delete_current_image)
+        self.delete_image_btn.pack(fill=tk.X, padx=5, pady=(10, 0))
+
         # Status bar
         self.status_bar = tk.Label(self.left_frame, text="No folder selected", bd=1, relief=tk.SUNKEN, anchor=tk.W,
-                                   bg='#f0f0f0')
+                                 bg='#f0f0f0')
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
         # Image canvas
@@ -148,26 +139,21 @@ class AnnotationApp:
 
         # Bind canvas events
         self.canvas.bind("<Button-1>", self.canvas_left_click)
-        self.canvas.bind("<B1-Motion>", self.canvas_mouse_move)
-        self.canvas.bind("<Button-3>", self.canvas_right_click)
-        self.canvas.bind("<Motion>", self.canvas_mouse_move)
-
+        self.canvas.bind("<B1-Motion>", self.canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.canvas_left_release)
         self.canvas.bind("<Double-Button-1>", self.canvas_double_click)
-
-        # Image display variables
-        self.image_on_canvas = None
-        self.image_ratio = 1.0
-        self.image_position = (0, 0)
+        self.canvas.bind("<Motion>", self.canvas_mouse_move)
+        self.canvas.bind("<Button-3>", self.canvas_right_click)
 
     def toggle_drawing_mode(self):
         self.solid_line_mode = not self.solid_line_mode
         if self.solid_line_mode:
             self.mode_btn.config(text="Switch to Point Mode")
+            self.status_bar.config(text="Drawing mode: Solid Line (hold LMB to draw)")
         else:
             self.mode_btn.config(text="Switch to Solid Line")
+            self.status_bar.config(text="Drawing mode: Point-by-Point")
 
-        # Clear any ongoing drawing
         self.current_polygon = []
         self.solid_line_points = []
         self.canvas.delete("preview")
@@ -176,7 +162,7 @@ class AnnotationApp:
     def bind_shortcuts(self):
         # Bind number keys 1-9 to select classes
         for i in range(1, 10):
-            self.root.bind(str(i), lambda event, idx=i - 1: self.select_class_by_index(idx))
+            self.root.bind(str(i), lambda event, idx=i-1: self.select_class_by_index(idx))
 
         # Bind Ctrl+Z for undo
         self.root.bind("<Control-z>", self.undo_last_action)
@@ -190,22 +176,19 @@ class AnnotationApp:
         # Bind arrow keys for navigation
         self.root.bind("<Left>", lambda e: self.prev_image())
         self.root.bind("<Right>", lambda e: self.next_image())
+        self.root.bind("<Up>", lambda e: self.select_prev_class())
+        self.root.bind("<Down>", lambda e: self.select_next_class())
 
         # Bind Delete key to delete selected polygon
         self.root.bind("<Delete>", lambda e: self.delete_selected_polygon())
 
+        # Bind 'm' key to toggle drawing mode
         self.root.bind("m", lambda e: self.toggle_drawing_mode())
-
-        self.root.bind("<Up>", lambda e: self.select_prev_class())
-        self.root.bind("<Down>", lambda e: self.select_next_class())
-
-        self.root.bind("<Control-Up>", lambda e: self.move_class(up=True))
-        self.root.bind("<Control-Down>", lambda e: self.move_class(up=False))
 
     def set_ctrl_state(self, state):
         self.ctrl_pressed = state
         if state:
-            self.canvas.config(cursor="fleur")  # Change cursor when Ctrl is pressed
+            self.canvas.config(cursor="fleur")
         else:
             self.canvas.config(cursor="cross")
             self.dragging_vertex = None
@@ -368,25 +351,21 @@ class AnnotationApp:
             ]
 
             # Check if this polygon is selected
-            is_selected = False
-            for item in self.canvas.find_withtag(f"polygon_{ann_id}"):
-                if "selected" in self.canvas.gettags(item):
-                    is_selected = True
-                    break
+            is_selected = (ann_id == self.selected_polygon_id)
 
-            # Create polygon with more transparent fill
+            # Create polygon with white border if selected
             outline_color = "#ffffff" if is_selected else self.get_class_color(class_id)
             outline_width = 3 if is_selected else 2
 
             polygon_id = self.canvas.create_polygon(
                 scaled_points,
                 outline=outline_color,
-                fill="",  # No solid fill
+                fill="",
                 width=outline_width,
                 tags=("polygon", f"polygon_{ann_id}")
             )
 
-            # Add very transparent fill (using stipple pattern with lighter pattern)
+            # Add transparent fill
             fill_id = self.canvas.create_polygon(
                 scaled_points,
                 outline="",
@@ -398,7 +377,6 @@ class AnnotationApp:
             # Add class label
             if self.classes and class_id < len(self.classes):
                 label_text = self.classes[class_id]
-                # Place label near the first point
                 label_x, label_y = scaled_points[0]
                 label_id = self.canvas.create_text(
                     label_x, label_y - 10,
@@ -408,12 +386,12 @@ class AnnotationApp:
                     tags=("label", f"label_{ann_id}")
                 )
 
-            # Draw vertices
+            # Draw vertices (no color change for selection)
             for i, (x, y) in enumerate(scaled_points):
                 vertex_id = self.canvas.create_oval(
                     x - 3, y - 3, x + 3, y + 3,
                     fill=self.get_class_color(class_id),
-                    outline="white",
+                    outline="white",  # Always white outline for vertices
                     tags=("vertex", f"vertex_{ann_id}_{i}")
                 )
 
@@ -827,14 +805,29 @@ class AnnotationApp:
                     ann_id = int(parts[1])
                     vertex_idx = int(parts[2])
                     self.dragging_vertex = (ann_id, vertex_idx)
+                    self.dragging_offset = (event.x, event.y)
+                    # Select the polygon when dragging its vertex
+                    self.selected_polygon_id = ann_id
+                    # Redraw to update selection
+                    self.display_image()
                     return
             return
 
-        # Normal annotation mode
-        if self.dragging_vertex is not None:
+        # If in solid line mode and not dragging vertex
+        if self.solid_line_mode and self.dragging_vertex is None:
+            img_x = (event.x - self.image_position[0]) / self.image_ratio
+            img_y = (event.y - self.image_position[1]) / self.image_ratio
+            img_width, img_height = self.current_image.size
+
+            if 0 <= img_x <= img_width and 0 <= img_y <= img_height:
+                normalized_x = img_x / img_width
+                normalized_y = img_y / img_height
+                self.solid_line_points = [(normalized_x, normalized_y)]
+                self.solid_line_id = "solid_" + str(id(self))
+                self.is_drawing_solid_line = True
             return
 
-        # Check if we clicked on a vertex
+        # Check if clicked on vertex
         clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
         vertex_clicked = False
 
@@ -847,39 +840,43 @@ class AnnotationApp:
         if vertex_clicked:
             return
 
-        # Check if we clicked on a polygon edge (to select it)
+        # Check if clicked on polygon (to select it)
         for item in clicked_items:
             tags = self.canvas.gettags(item)
             if "polygon" in tags:
-                # Select this polygon
-                self.canvas.itemconfig("polygon", width=2)
-                self.canvas.itemconfig(item, width=3, tags=tags + ("selected",))
+                # Clear previous selection
+                self.canvas.itemconfig("polygon", width=2, outline=self.get_class_color(self.current_class))
+                # Select this polygon with white border
+                self.canvas.itemconfig(item, width=3, outline="#ffffff", tags=tags + ("selected",))
+                self.selected_polygon_id = int(tags[1].split("_")[1])
                 return
 
-        # Convert canvas coordinates to image coordinates
-        img_x = (event.x - self.image_position[0]) / self.image_ratio
-        img_y = (event.y - self.image_position[1]) / self.image_ratio
+        # Normal point-by-point mode
+        if not self.solid_line_mode and not self.ctrl_pressed:
+            img_x = (event.x - self.image_position[0]) / self.image_ratio
+            img_y = (event.y - self.image_position[1]) / self.image_ratio
+            img_width, img_height = self.current_image.size
 
-        # Check if click is within image bounds
-        img_width, img_height = self.current_image.size
-        if 0 <= img_x <= img_width and 0 <= img_y <= img_height:
-            # Normalize coordinates
-            normalized_x = img_x / img_width
-            normalized_y = img_y / img_height
-
-            if self.solid_line_mode:
-                # Start new solid line drawing
-                self.solid_line_points = [(normalized_x, normalized_y)]
-                self.solid_line_id = "solid_" + str(id(self))
-                self.is_drawing_solid_line = True  # New flag to track drawing state
-            else:
-                # Point-by-point mode
+            if 0 <= img_x <= img_width and 0 <= img_y <= img_height:
+                normalized_x = img_x / img_width
+                normalized_y = img_y / img_height
                 self.current_polygon.append((normalized_x, normalized_y))
                 self.draw_current_polygon(event.x, event.y)
 
+    def handle_vertex_grab(self, event):
+        clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
+        for item in clicked_items:
+            tags = self.canvas.gettags(item)
+            if "vertex" in tags:
+                parts = tags[1].split("_")
+                ann_id = int(parts[1])
+                vertex_idx = int(parts[2])
+                self.dragging_vertex = (ann_id, vertex_idx)
+                self.dragging_offset = (event.x, event.y)
+                return
+
     def canvas_left_release(self, event):
         if self.solid_line_mode and self.is_drawing_solid_line:
-            # Complete the solid line area when mouse button is released
             if len(self.solid_line_points) >= 2:
                 self.complete_solid_line_area()
             self.is_drawing_solid_line = False
@@ -996,45 +993,57 @@ class AnnotationApp:
         if self.dragging_vertex is not None and self.ctrl_pressed:
             ann_id, vertex_idx = self.dragging_vertex
             if ann_id in self.annotations:
-                # Convert canvas coordinates to image coordinates
                 img_x = (event.x - self.image_position[0]) / self.image_ratio
                 img_y = (event.y - self.image_position[1]) / self.image_ratio
-
-                # Constrain to image bounds
                 img_width, img_height = self.current_image.size
+
                 img_x = max(0, min(img_x, img_width))
                 img_y = max(0, min(img_y, img_height))
 
-                # Update vertex position
                 normalized_x = img_x / img_width
                 normalized_y = img_y / img_height
                 self.annotations[ann_id]['points'][vertex_idx] = (normalized_x, normalized_y)
 
-                # Redraw
                 self.save_annotations()
                 self.display_image()
+        elif self.is_drawing_solid_line:
+            self.canvas_mouse_move(event)
+
+    def move_vertex(self, event):
+        ann_id, vertex_idx = self.dragging_vertex
+        if ann_id not in self.annotations:
+            return
+
+        img_x = (event.x - self.image_position[0]) / self.image_ratio
+        img_y = (event.y - self.image_position[1]) / self.image_ratio
+        img_width, img_height = self.current_image.size
+
+        img_x = max(0, min(img_x, img_width))
+        img_y = max(0, min(img_y, img_height))
+
+        normalized_x = img_x / img_width
+        normalized_y = img_y / img_height
+        self.annotations[ann_id]['points'][vertex_idx] = (normalized_x, normalized_y)
+
+        self.display_image()
 
     def canvas_release(self, event):
         self.dragging_vertex = None
 
     def canvas_double_click(self, event):
-        # Check if we double-clicked on a polygon edge to add a vertex
-        clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
+        if not self.solid_line_mode and hasattr(self, 'selected_polygon_id'):
+            clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
 
-        for item in clicked_items:
-            tags = self.canvas.gettags(item)
-            if "polygon" in tags:
-                ann_id = int(tags[1].split("_")[1])
-                if ann_id in self.annotations:
-                    # Convert canvas coordinates to image coordinates for calculations
+            for item in clicked_items:
+                tags = self.canvas.gettags(item)
+                if "polygon" in tags and f"polygon_{self.selected_polygon_id}" in tags:
                     img_width, img_height = self.current_image.size
                     points = [
                         ((p[0] * img_width * self.image_ratio + self.image_position[0],
                           p[1] * img_height * self.image_ratio + self.image_position[1]))
-                        for p in self.annotations[ann_id]['points']
+                        for p in self.annotations[self.selected_polygon_id]['points']
                     ]
 
-                    # Find the closest edge
                     closest_edge = None
                     min_dist = float('inf')
                     new_point = None
@@ -1042,8 +1051,6 @@ class AnnotationApp:
                     for i in range(len(points)):
                         p1 = points[i]
                         p2 = points[(i + 1) % len(points)]
-
-                        # Calculate distance to line segment
                         dist, closest = self.point_to_line_distance((event.x, event.y), p1, p2)
 
                         if dist < min_dist:
@@ -1051,15 +1058,14 @@ class AnnotationApp:
                             closest_edge = i
                             new_point = closest
 
-                    if closest_edge is not None and min_dist < 10:  # Only if close enough
-                        # Convert back to normalized coordinates
+                    if closest_edge is not None and min_dist < 10:
                         img_x = (new_point[0] - self.image_position[0]) / self.image_ratio
                         img_y = (new_point[1] - self.image_position[1]) / self.image_ratio
                         normalized_x = img_x / img_width
                         normalized_y = img_y / img_height
 
-                        # Add new vertex
-                        self.annotations[ann_id]['points'].insert(closest_edge + 1, (normalized_x, normalized_y))
+                        self.annotations[self.selected_polygon_id]['points'].insert(
+                            closest_edge + 1, (normalized_x, normalized_y))
 
                         self.save_annotations()
                         self.display_image()
