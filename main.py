@@ -235,18 +235,22 @@ class AnnotationApp:
                     if len(parts) < 6:  # At least class + 3 points (x,y)
                         continue
 
-                    class_id = int(parts[0])
-                    if class_id >= len(self.classes):
+                    try:
+                        class_id = int(parts[0])
+                        # Skip if class_id is invalid
+                        if class_id >= len(self.classes):
+                            continue
+
+                        points = list(map(float, parts[1:]))
+                        normalized_points = [(points[i], points[i + 1]) for i in range(0, len(points), 2)]
+
+                        self.annotations[self.current_annotation_id] = {
+                            'class_id': class_id,
+                            'points': normalized_points
+                        }
+                        self.current_annotation_id += 1
+                    except (ValueError, IndexError):
                         continue
-
-                    points = list(map(float, parts[1:]))
-                    normalized_points = [(points[i], points[i + 1]) for i in range(0, len(points), 2)]
-
-                    self.annotations[self.current_annotation_id] = {
-                        'class_id': class_id,
-                        'points': normalized_points
-                    }
-                    self.current_annotation_id += 1
 
     def save_annotations(self):
         if not self.image_folder or self.current_image_index == -1:
@@ -452,11 +456,57 @@ class AnnotationApp:
 
     def remove_class(self):
         selection = self.classes_listbox.curselection()
-        if selection:
-            index = selection[0]
-            self.classes.pop(index)
-            self.update_classes_listbox()
-            self.refresh_annotations()
+        if not selection:
+            return
+
+        index = selection[0]
+        class_to_remove = self.classes[index]
+
+        confirm = messagebox.askyesno(
+            "Confirm Deletion",
+            f"Delete class '{class_to_remove}'? All annotations of this class will be removed."
+        )
+        if not confirm:
+            return
+
+        # First remove all annotations with this class
+        annotations_to_delete = [
+            ann_id for ann_id, ann in self.annotations.items()
+            if ann['class_id'] == index
+        ]
+        for ann_id in annotations_to_delete:
+            del self.annotations[ann_id]
+
+        # Then update class_ids for annotations with higher indices
+        for ann_id, ann in self.annotations.items():
+            if ann['class_id'] > index:
+                ann['class_id'] -= 1
+
+        # Remove the class from the list
+        self.classes.pop(index)
+
+        # Update UI and colors
+        self.class_colors = {}  # Reset colors to regenerate
+        self.update_classes_listbox()
+
+        # Reset current class selection if it was affected
+        if self.current_class == index:
+            self.current_class = None
+        elif self.current_class > index:
+            self.current_class -= 1
+
+        self.save_annotations()
+        self.display_image()
+
+    def remove_annotations_for_class(self, class_id):
+        """Remove all annotations for a given class_id"""
+        annotations_to_delete = [
+            ann_id for ann_id, ann in self.annotations.items()
+            if ann['class_id'] == class_id
+        ]
+        for ann_id in annotations_to_delete:
+            del self.annotations[ann_id]
+        self.save_annotations()
 
     def import_classes(self):
         file_path = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")])
