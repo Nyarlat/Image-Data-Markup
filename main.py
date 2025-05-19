@@ -82,14 +82,26 @@ class AnnotationApp:
         classes_btn_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         classes_btn_frame.pack(fill=tk.X)
 
-        self.add_class_btn = tk.Button(classes_btn_frame, text="Add", command=self.add_class)
-        self.add_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        btn_frame_top = tk.Frame(classes_btn_frame, bg='#f0f0f0')
+        btn_frame_top.pack(fill=tk.X)
 
-        self.rename_class_btn = tk.Button(classes_btn_frame, text="Rename", command=self.rename_class)
-        self.rename_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.add_class_btn = tk.Button(btn_frame_top, text="Add", command=self.add_class)
+        self.add_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
 
-        self.remove_class_btn = tk.Button(classes_btn_frame, text="Remove", command=self.remove_class)
-        self.remove_class_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        self.rename_class_btn = tk.Button(btn_frame_top, text="Rename", command=self.rename_class)
+        self.rename_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.remove_class_btn = tk.Button(btn_frame_top, text="Remove", command=self.remove_class)
+        self.remove_class_btn.pack(side=tk.LEFT, expand=True, padx=2)
+
+        btn_frame_bottom = tk.Frame(classes_btn_frame, bg='#f0f0f0')
+        btn_frame_bottom.pack(fill=tk.X)
+
+        self.move_up_btn = tk.Button(btn_frame_bottom, text="Move up", command=lambda: self.move_class(up=True))
+        self.move_up_btn.pack(side=tk.LEFT, expand=True, padx=2)
+
+        self.move_down_btn = tk.Button(btn_frame_bottom, text="Move down", command=lambda: self.move_class(up=False))
+        self.move_down_btn.pack(side=tk.LEFT, expand=True, padx=2)
 
         # Import/Export buttons
         classes_io_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
@@ -750,25 +762,20 @@ class AnnotationApp:
             messagebox.showinfo("Info", "No polygon selected")
 
     def change_selected_polygon_class(self):
-        if not self.annotations or self.current_class is None:
+        if not hasattr(self, 'selected_polygon_id') or self.selected_polygon_id is None:
+            messagebox.showinfo("Info", "No polygon selected")
             return
 
-        # Find selected polygon (last clicked)
-        selected = None
-        for item in self.canvas.find_withtag("selected"):
-            tags = self.canvas.gettags(item)
-            for tag in tags:
-                if tag.startswith("polygon_"):
-                    ann_id = int(tag.split("_")[1])
-                    selected = ann_id
-                    break
-            if selected is not None:
-                break
+        if self.current_class is None:
+            messagebox.showwarning("Warning", "Please select a class first")
+            return
 
-        if selected is not None and selected in self.annotations:
-            self.annotations[selected]['class_id'] = self.current_class
+        if self.selected_polygon_id in self.annotations:
+            self.annotations[self.selected_polygon_id]['class_id'] = self.current_class
             self.save_annotations()
             self.display_image()
+        else:
+            messagebox.showinfo("Info", "Selected polygon no longer exists")
 
     def clear_all_annotations(self):
         if not self.annotations:
