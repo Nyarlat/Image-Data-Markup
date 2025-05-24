@@ -1,4 +1,5 @@
 import os
+from ultralytics import YOLO
 import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
@@ -34,6 +35,11 @@ class AnnotationApp:
 
         # UI Setup
         self.setup_ui()
+
+        # AI module
+        self.model = None
+        self.load_model()
+        self.conf = 0.6
 
         # Bind keyboard shortcuts
         self.bind_shortcuts()
@@ -127,6 +133,9 @@ class AnnotationApp:
 
         tool_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         tool_frame.pack(fill=tk.X)
+
+        self.auto_annotate_btn = tk.Button(tool_frame, text="Auto-Annotate", command=self.auto_annotate_image)
+        self.auto_annotate_btn.pack(fill=tk.X, padx=2, pady=2)
 
         self.mode_btn = tk.Button(tool_frame, text="Switch to Solid Line", command=self.toggle_drawing_mode)
         self.mode_btn.pack(fill=tk.X, padx=2, pady=2)
@@ -1186,6 +1195,110 @@ class AnnotationApp:
                 new_index = 0
 
         self.select_class_by_index(new_index)
+
+    def load_model(self):
+        model_path = "best.pt"
+        if os.path.exists(model_path):
+            try:
+                self.model = YOLO(model_path)
+                self.model.eval()
+                self.status_bar.config(text="Model loaded successfully")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load model: {e}")
+                self.model = None
+        else:
+            self.model = None
+
+    def auto_annotate_image(self):
+        if not self.model:
+            messagebox.showerror("Error", "Model 'best.pt' not found or failed to load")
+            return
+
+        if not self.images or self.current_image_index == -1:
+            messagebox.showerror("Error", "No image loaded")
+            return
+
+        if not self.classes:
+            messagebox.showerror("Error", "No classes defined")
+            return
+
+        # Clear existing annotations
+        self.annotations = {}
+        self.current_annotation_id = 0
+
+        # Get current image
+        image_file = self.images[self.current_image_index]
+        image_path = os.path.join(self.image_folder, image_file)
+
+        try:
+            # Run model prediction
+            results = self.model(image_path)
+
+            # Process results (assuming segmentation model)
+            for result in results:
+                if not result.masks:
+                    messagebox.showwarning("Warning", "Model doesn't output segmentation masks")
+                    return
+
+                img_width = result.orig_shape[1]
+                img_height = result.orig_shape[0]
+
+                for i, mask in enumerate(result.masks):
+                    class_id = int(result.boxes.cls[i].item())
+                    conf = result.boxes.conf[i].item()
+
+                    if conf < self.conf or class_id >= len(self.classes):
+                        continue
+
+                    # Get and process mask points
+                    mask_points = mask.xy[0]
+                    processed_points = []
+
+                    for point in mask_points:
+                        # Clamp coordinates to image boundaries
+                        x = max(0, min(point[0], img_width - 1))
+                        y = max(0, min(point[1], img_height - 1))
+
+                        # Convert to normalized coordinates
+                        x_norm = x / img_width
+                        y_norm = y / img_height
+
+                        # Ensure normalized coordinates are within [0, 1]
+                        x_norm = max(0.0, min(x_norm, 1.0))
+                        y_norm = max(0.0, min(y_norm, 1.0))
+
+                        processed_points.append((x_norm, y_norm))
+
+                    # Simplify points
+                    simplified_points = self.simplify_points(processed_points)
+
+                    # Ensure polygon is closed and valid
+                    if len(simplified_points) >= 3:
+                        if simplified_points[0] != simplified_points[-1]:
+                            simplified_points.append(simplified_points[0])
+
+                        # Final validation of all points
+                        valid_points = []
+                        for x, y in simplified_points:
+                            if 0 <= x <= 1 and 0 <= y <= 1:
+                                valid_points.append((x, y))
+
+                        if len(valid_points) >= 3:
+                            self.annotations[self.current_annotation_id] = {
+                                'class_id': class_id,
+                                'points': valid_points
+                            }
+                            self.current_annotation_id += 1
+
+            if self.annotations:
+                self.save_annotations()
+                self.display_image()
+                self.status_bar.config(text=f"Auto-annotated {len(self.annotations)} objects (simplified)")
+            else:
+                self.status_bar.config(text="No valid objects found for auto-annotation")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to auto-annotate: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
