@@ -1,5 +1,5 @@
 import os
-from ultralytics import YOLO
+# from ultralytics import YOLO
 import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
@@ -134,8 +134,8 @@ class AnnotationApp:
         tool_frame = tk.Frame(self.left_frame, bg='#f0f0f0')
         tool_frame.pack(fill=tk.X)
 
-        self.auto_annotate_btn = tk.Button(tool_frame, text="Auto-Annotate", command=self.auto_annotate_image)
-        self.auto_annotate_btn.pack(fill=tk.X, padx=2, pady=2)
+        # self.auto_annotate_btn = tk.Button(tool_frame, text="Auto-Annotate", command=self.auto_annotate_image)
+        # self.auto_annotate_btn.pack(fill=tk.X, padx=2, pady=2)
 
         self.mode_btn = tk.Button(tool_frame, text="Switch to Solid Line", command=self.toggle_drawing_mode)
         self.mode_btn.pack(fill=tk.X, padx=2, pady=2)
@@ -1197,17 +1197,18 @@ class AnnotationApp:
         self.select_class_by_index(new_index)
 
     def load_model(self):
-        model_path = "best.pt"
-        if os.path.exists(model_path):
-            try:
-                self.model = YOLO(model_path)
-                self.model.eval()
-                self.status_bar.config(text="Model loaded successfully")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to load model: {e}")
-                self.model = None
-        else:
-            self.model = None
+        # model_path = "best.pt"
+        # if os.path.exists(model_path):
+        #     try:
+        #         self.model = YOLO(model_path)
+        #         self.model.eval()
+        #         self.status_bar.config(text="Model loaded successfully")
+        #     except Exception as e:
+        #         messagebox.showerror("Error", f"Failed to load model: {e}")
+        #         self.model = None
+        # else:
+        #     self.model = None
+        self.model = None
 
     def auto_annotate_image(self):
         if not self.model:
