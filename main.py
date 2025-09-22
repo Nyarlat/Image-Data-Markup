@@ -6,6 +6,8 @@ from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 import numpy as np
 from scipy.interpolate import splprep, splev
+from segment_anything import sam_model_registry, SamPredictor
+import cv2
 
 class AnnotationApp:
     def __init__(self, root):
@@ -36,14 +38,20 @@ class AnnotationApp:
         # UI Setup
         self.setup_ui()
 
+        # Magic Wand mode
+        self.magic_wand_mode = False
+        self.predictor = None  # Will hold SamPredictor
+        self.predictor_set = False  # Flag to indicate if image is set in predictor
+        self.current_prompt_points = []  # List of (x, y) for SAM prompts (raw image coords)
+        self.current_prompt_labels = []  # List of 1 (foreground) or 0 (background)
+        self.current_preview_points = []  # For drawing preview polygon
+
         # AI module
         self.model = None
         self.load_model()
         self.conf = 0.6
-
         # Bind keyboard shortcuts
         self.bind_shortcuts()
-
 
     def setup_ui(self):
         # Main frames
@@ -140,6 +148,9 @@ class AnnotationApp:
         self.mode_btn = tk.Button(tool_frame, text="Switch to Solid Line", command=self.toggle_drawing_mode)
         self.mode_btn.pack(fill=tk.X, padx=2, pady=2)
 
+        self.magic_wand_btn = tk.Button(tool_frame, text="Toggle Magic Wand", command=self.toggle_magic_wand)
+        self.magic_wand_btn.pack(fill=tk.X, padx=2, pady=2)
+
         self.delete_poly_btn = tk.Button(tool_frame, text="Delete Selected", command=self.delete_selected_polygon)
         self.delete_poly_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
 
@@ -180,6 +191,149 @@ class AnnotationApp:
         self.canvas.delete("preview")
         self.solid_line_id = None
 
+    def toggle_magic_wand(self):
+        if self.model is None or self.predictor is None:
+            messagebox.showerror("Error", "SAM model not loaded. Check load_model.")
+            return
+        if self.magic_wand_mode and self.current_prompt_points:
+            self.save_preview_to_annotation()
+        self.magic_wand_mode = not self.magic_wand_mode
+        # Disable other modes if needed (optional)
+        self.solid_line_mode = False
+        self.is_drawing_solid_line = False
+        mode_text = "Magic Wand (left: fg, right: bg, Enter: save)" if self.magic_wand_mode else "Point-by-Point"
+        self.status_bar.config(text=f"Drawing mode: {mode_text}")
+        self.current_polygon = []
+        self.solid_line_points = []
+        self.current_prompt_points = []
+        self.current_prompt_labels = []
+        self.current_preview_points = []
+        self.canvas.delete("preview")
+        self.canvas.delete("prompt_point")
+        self.canvas.delete("sam_preview")
+
+    def run_sam_predict(self):
+        if not self.current_prompt_points:
+            return None
+
+        if self.predictor is None:
+            return None
+
+        img_width, img_height = self.current_image.size
+
+        # Set image if not set
+        if not self.predictor_set:
+            image_rgb = np.array(self.current_image.convert("RGB"))
+            self.predictor.set_image(image_rgb)
+            self.predictor_set = True
+
+        # Convert lists to numpy arrays
+        input_points = np.array(self.current_prompt_points)
+        input_labels = np.array(self.current_prompt_labels)
+
+        # Predict
+        masks, scores, _ = self.predictor.predict(
+            point_coords=input_points,
+            point_labels=input_labels,
+            multimask_output=True
+        )
+
+        # Select best mask
+        best_index = np.argmax(scores)
+        best_mask = masks[best_index]
+
+        # Convert to uint8
+        best_mask = best_mask.astype(np.uint8) * 255
+
+        # Find contours
+        contours, _ = cv2.findContours(best_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        # Largest contour
+        contour = max(contours, key=cv2.contourArea)
+
+        # Simplify
+        epsilon = 0.001 * cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+
+        # Normalized points
+        points = []
+        for pt in approx:
+            x_norm = pt[0][0] / img_width
+            y_norm = pt[0][1] / img_height
+            x_norm = max(0.0, min(1.0, x_norm))
+            y_norm = max(0.0, min(1.0, y_norm))
+            points.append((x_norm, y_norm))
+
+        if len(points) < 3:
+            return None
+
+        if points[0] != points[-1]:
+            points.append(points[0])
+
+        return points
+
+    def update_sam_preview(self):
+        self.canvas.delete("sam_preview")
+        points = self.run_sam_predict()
+        if points is None:
+            self.current_preview_points = []
+            return
+
+        self.current_preview_points = points
+
+        # Draw preview polygon
+        img_width, img_height = self.current_image.size
+        scaled_points = [
+            (p[0] * img_width * self.image_ratio + self.image_position[0],
+             p[1] * img_height * self.image_ratio + self.image_position[1])
+            for p in points
+        ]
+
+        self.canvas.create_polygon(
+            scaled_points,
+            outline=self.get_class_color(self.current_class),
+            fill="",
+            width=2,
+            dash=(4, 4),
+            tags="sam_preview"
+        )
+
+    def save_preview_to_annotation(self):
+        if not self.current_preview_points:
+            return
+
+        self.annotations[self.current_annotation_id] = {
+            'class_id': self.current_class,
+            'points': self.current_preview_points
+        }
+        self.current_annotation_id += 1
+        self.save_annotations()
+        self.display_image()
+        self.selected_polygon_id = self.current_annotation_id - 1
+        self.clear_prompt_points()
+
+    def clear_prompt_points(self):
+        self.current_prompt_points = []
+        self.current_prompt_labels = []
+        self.current_preview_points = []
+        self.canvas.delete("prompt_point")
+        self.canvas.delete("sam_preview")
+
+    def draw_prompt_points(self):
+        self.canvas.delete("prompt_point")
+        img_width, img_height = self.current_image.size
+        for i, (img_x, img_y) in enumerate(self.current_prompt_points):
+            label = self.current_prompt_labels[i]
+            color = "green" if label == 1 else "red"
+            x_canvas = (img_x / img_width) * img_width * self.image_ratio + self.image_position[0]
+            y_canvas = (img_y / img_height) * img_height * self.image_ratio + self.image_position[1]
+            self.canvas.create_oval(
+                x_canvas - 4, y_canvas - 4, x_canvas + 4, y_canvas + 4,
+                fill=color, outline="white", tags="prompt_point"
+            )
+
     def bind_shortcuts(self):
         # Bind number keys 1-9 to select classes
         for i in range(1, 10):
@@ -205,6 +359,12 @@ class AnnotationApp:
 
         # Bind 'm' key to toggle drawing mode
         self.root.bind("m", lambda e: self.toggle_drawing_mode())
+
+        # Bind 'Escape' to clear prompt points in magic wand mode
+        self.root.bind("<Escape>", lambda e: self.clear_prompt_points() if self.magic_wand_mode else None)
+
+        # Bind 'Return' to save preview in magic wand mode
+        self.root.bind("<Return>", lambda e: self.save_preview_to_annotation() if self.magic_wand_mode else None)
 
     def set_ctrl_state(self, state):
         self.ctrl_pressed = state
@@ -300,6 +460,7 @@ class AnnotationApp:
 
         try:
             self.current_image = Image.open(image_path)
+            self.predictor_set = False
             self.update_image_display()
 
             # Update image counter
@@ -354,6 +515,24 @@ class AnnotationApp:
 
         # Draw annotations
         self.draw_annotations()
+
+        # Redraw prompt points and preview if in magic wand mode
+        if self.magic_wand_mode:
+            self.draw_prompt_points()
+            if self.current_preview_points:
+                scaled_points = [
+                    (p[0] * img_width * self.image_ratio + x_pos,
+                     p[1] * img_height * self.image_ratio + y_pos)
+                    for p in self.current_preview_points
+                ]
+                self.canvas.create_polygon(
+                    scaled_points,
+                    outline=self.get_class_color(self.current_class),
+                    fill="",
+                    width=2,
+                    dash=(4, 4),
+                    tags="sam_preview"
+                )
 
     def draw_annotations(self):
         for ann_id, ann in self.annotations.items():
@@ -660,6 +839,8 @@ class AnnotationApp:
             self.classes_listbox.activate(self.current_class)
 
     def select_class_by_index(self, index):
+        if self.magic_wand_mode and self.current_prompt_points:
+            self.save_preview_to_annotation()
         if not self.classes:
             return
 
@@ -671,6 +852,8 @@ class AnnotationApp:
             self.current_class = index
             self.status_bar.config(
                 text=f"Selected class: {self.classes[index]}")
+            if self.magic_wand_mode:
+                self.update_sam_preview()  # Update preview with new color if needed
 
     def jump_to_image(self, event=None):
         try:
@@ -690,6 +873,8 @@ class AnnotationApp:
             # Save current annotations before switching
             if self.current_polygon:
                 self.save_current_polygon()
+            if self.magic_wand_mode and self.current_prompt_points:
+                self.save_preview_to_annotation()
             self.save_annotations()
 
             self.current_image_index += 1
@@ -704,6 +889,8 @@ class AnnotationApp:
             # Save current annotations before switching
             if self.current_polygon:
                 self.save_current_polygon()
+            if self.magic_wand_mode and self.current_prompt_points:
+                self.save_preview_to_annotation()
             self.save_annotations()
 
             self.current_image_index -= 1
@@ -801,6 +988,17 @@ class AnnotationApp:
             messagebox.showwarning("Warning", "Please select a class first")
             return
 
+        if self.magic_wand_mode:
+            img_x = (event.x - self.image_position[0]) / self.image_ratio
+            img_y = (event.y - self.image_position[1]) / self.image_ratio
+            img_width, img_height = self.current_image.size
+            if 0 <= img_x < img_width and 0 <= img_y < img_height:
+                self.current_prompt_points.append((img_x, img_y))
+                self.current_prompt_labels.append(1)  # Foreground
+                self.draw_prompt_points()
+                self.update_sam_preview()
+            return
+
         # Check if we're dragging a vertex (with Ctrl pressed)
         if self.ctrl_pressed:
             clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
@@ -875,6 +1073,27 @@ class AnnotationApp:
                 # Clear selection when starting new annotation
                 self.selected_polygon_id = None
 
+    def canvas_right_click(self, event):
+        if self.magic_wand_mode:
+            img_x = (event.x - self.image_position[0]) / self.image_ratio
+            img_y = (event.y - self.image_position[1]) / self.image_ratio
+            img_width, img_height = self.current_image.size
+            if 0 <= img_x < img_width and 0 <= img_y < img_height:
+                self.current_prompt_points.append((img_x, img_y))
+                self.current_prompt_labels.append(0)  # Background
+                self.draw_prompt_points()
+                self.update_sam_preview()
+            return
+
+        if self.solid_line_mode:
+            if len(self.solid_line_points) >= 2:
+                # Complete the solid line area
+                self.complete_solid_line_area()
+        elif len(self.current_polygon) >= 3:
+            # Save the polygon
+            self.save_current_polygon()
+            self.display_image()
+
     def handle_vertex_grab(self, event):
         clicked_items = self.canvas.find_overlapping(event.x - 5, event.y - 5, event.x + 5, event.y + 5)
         for item in clicked_items:
@@ -893,16 +1112,6 @@ class AnnotationApp:
                 self.complete_solid_line_area()
             self.is_drawing_solid_line = False
         self.dragging_vertex = None
-
-    def canvas_right_click(self, event):
-        if self.solid_line_mode:
-            if len(self.solid_line_points) >= 2:
-                # Complete the solid line area
-                self.complete_solid_line_area()
-        elif len(self.current_polygon) >= 3:
-            # Save the polygon
-            self.save_current_polygon()
-            self.display_image()
 
     def canvas_mouse_move(self, event):
         if self.solid_line_mode and self.is_drawing_solid_line:
@@ -1165,7 +1374,10 @@ class AnnotationApp:
 
         selection = self.classes_listbox.curselection()
         if selection:
+            old_class = self.current_class
             self.current_class = selection[0]
+            if self.magic_wand_mode and self.current_prompt_points and old_class != self.current_class:
+                self.save_preview_to_annotation()
             self.status_bar.config(text=f"Selected class: {self.classes[self.current_class]}")
 
     def select_prev_class(self):
@@ -1197,18 +1409,17 @@ class AnnotationApp:
         self.select_class_by_index(new_index)
 
     def load_model(self):
-        # model_path = "best.pt"
-        # if os.path.exists(model_path):
-        #     try:
-        #         self.model = YOLO(model_path)
-        #         self.model.eval()
-        #         self.status_bar.config(text="Model loaded successfully")
-        #     except Exception as e:
-        #         messagebox.showerror("Error", f"Failed to load model: {e}")
-        #         self.model = None
-        # else:
-        #     self.model = None
-        self.model = None
+        model_type = "vit_b"  # Use "vit_b" for a lighter model if needed
+        checkpoint = "sam_vit_b_01ec64.pth"  # Path to your downloaded checkpoint
+        try:
+            self.model = sam_model_registry[model_type](checkpoint=checkpoint)
+            self.model.to(device="cuda")
+            self.predictor = SamPredictor(self.model)
+            self.status_bar.config(text="SAM model loaded successfully")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load SAM model: {e}")
+            self.model = None
+            self.predictor = None
 
     def auto_annotate_image(self):
         if not self.model:
