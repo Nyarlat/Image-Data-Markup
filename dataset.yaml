@@ -1,0 +1,16 @@
+path: D:/hack/data
+train: ./train/
+val: ./val/
+
+names:  
+  0: Screwdriver_-
+  1: Screwdriver_+
+  2: Phillips-head_screwdriver
+  3: Brace
+  4: Locking_pliers
+  5: Combination_pliers
+  6: Pincer
+  7: Adjustable_wrench
+  8: Oil_can_opener
+  9: Open-end_wrench_3/4
+  10: Side_cutters
